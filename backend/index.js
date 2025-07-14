@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 const User = require('./models/UserModel');
+const Donor = require('./models/DonorModel');
+const Receipent = require('./models/RequestModel');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -58,7 +60,7 @@ app.post('/login', async (req, res) => {
         return res.status(400).json({ success: false, message: "Username and password are required" });
     }
     try {
-        const user = await User.find({ username });
+        const user = await User.findOne({ username });
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
@@ -71,7 +73,103 @@ app.post('/login', async (req, res) => {
         console.error("Login error:", err);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
-});                   
+});   
+
+
+app.post('/donate', async (req, res) => {
+  const {
+    fullName,
+    age,
+    gender,
+    bloodGroup,
+    organs,
+    phone,
+    email,
+    location,
+    pincode,
+    medical,
+    isBloodAvailable,
+    isOrganAvailable,
+    consent
+  } = req.body;
+
+  if (!fullName || !age || !gender || !bloodGroup || !organs || !phone) {
+    return res.status(400).json({ success: false, message: "Required fields missing" });
+  }
+
+  try {
+    const donation = new Donor({
+      fullName,
+      age,
+      gender,
+      bloodGroup,
+      organs,
+      phone,
+      email,
+      location,
+      pincode,
+      medical,
+      isBloodAvailable,
+      isOrganAvailable,
+      consent
+    });
+
+    await donation.save();
+
+    return res.status(201).json({ success: true, message: "Donation submitted successfully" });
+  } catch (err) {
+    console.error("Donation error:", err);
+    return res.status(500).json({ success: false, message: "Server error while submitting donation" });
+  }
+});
+
+app.post('/request', async (req, res) => {
+  const { 
+    fullname,
+    phone,
+    email,
+    lookingFor,
+    location,
+    pincode,
+    medicalCondition,
+    Emergency,
+    consent
+  } = req.body; 
+  if (!fullname || !phone || !lookingFor || !location || !pincode || !medicalCondition || consent === undefined) {
+    return res.status(400).json({ success: false, message: "Required fields missing" });
+  }
+  try {
+    const request = new Receipent({
+      fullname,
+      phone,
+      email,
+      lookingFor,
+      location,
+      pincode,
+      medicalCondition,
+      Emergency,
+      consent
+    });
+
+    await request.save();
+
+    return res.status(201).json({ success: true, message: "Help request submitted successfully" });
+  } catch (err) {
+    console.error("Request error:", err);
+    return res.status(500).json({ success: false, message: "Server error while submitting help request" });
+  }
+});
+
+
+app.get('/notifications', async (req, res) => {
+  try {
+    const emergencies = await Receipent.find({});
+    res.status(200).json(emergencies);
+  } catch (err) {
+    console.error("Error fetching emergencies:", err);
+    res.status(500).json({ message: "Server error fetching emergencies" });
+  }
+});
 
 
 
