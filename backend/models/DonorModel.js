@@ -64,6 +64,10 @@ const donorSchema = new mongoose.Schema(
       enum: ["pending", "matched", "completed"],
       default: "pending",
     },
+    readBy: [{
+         type: mongoose.Schema.Types.ObjectId,
+         ref: 'User'
+    }],
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

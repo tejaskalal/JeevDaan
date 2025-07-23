@@ -25,6 +25,7 @@ mongoose.connect(process.env.MONGO_URI, {
   console.error('MongoDB connection error:', err);
 });
 
+
 app.get('/', (req, res) => {
   res.send('Welcome to JeevDan Backend!');
 });
@@ -53,27 +54,26 @@ app.post('/signup', async (req, res) => {
 });
 
 
-
 app.post('/login', async (req, res) => {
-  const { username, password } = req.body;  
-    if (!username || !password) {
-        return res.status(400).json({ success: false, message: "Username and password are required" });
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: "Username and password are required" });
+  }
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
     }
-    try {
-        const user = await User.findOne({ username });
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
-        const isMatch = await user.comparePassword(password);
-        if (!isMatch) {
-            return res.status(401).json({ success: false, message: "Invalid credentials" });
-        }
-        return res.status(200).json({ success: true, message: "Login successful" });
-    } catch (err) {
-        console.error("Login error:", err);
-        return res.status(500).json({ success: false, message: "Internal server error" });
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-});   
+    return res.status(200).json({ success: true, message: "Login successful" ,token: "your-token", userId: user._id  });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
 
 
 app.post('/donate', async (req, res) => {
@@ -111,7 +111,8 @@ app.post('/donate', async (req, res) => {
       medical,
       isBloodAvailable,
       isOrganAvailable,
-      consent
+      consent,
+      read: false 
     });
 
     await donation.save();
@@ -123,32 +124,40 @@ app.post('/donate', async (req, res) => {
   }
 });
 
+
 app.post('/request', async (req, res) => {
-  const { 
+  const {
     fullname,
     phone,
     email,
     lookingFor,
+    organType,
+    bloodGroup,
     location,
     pincode,
     medicalCondition,
     Emergency,
     consent
-  } = req.body; 
+  } = req.body;
+
   if (!fullname || !phone || !lookingFor || !location || !pincode || !medicalCondition || consent === undefined) {
     return res.status(400).json({ success: false, message: "Required fields missing" });
   }
+
   try {
     const request = new Receipent({
       fullname,
       phone,
       email,
       lookingFor,
+      organType,
+      bloodGroup,
       location,
       pincode,
       medicalCondition,
       Emergency,
-      consent
+      consent,
+      read: false 
     });
 
     await request.save();
@@ -163,16 +172,125 @@ app.post('/request', async (req, res) => {
 
 app.get('/notifications', async (req, res) => {
   try {
-    const emergencies = await Receipent.find({});
-    res.status(200).json(emergencies);
+    const receipents = await Receipent.find();
+    const donors = await Donor.find();
+
+    const requestNotifications = receipents.map((item) => ({
+      id: item.id,
+      type: "request",
+      fullname: item.fullname,
+      phone: item.phone,
+      email: item.email,
+      lookingFor: item.lookingFor,
+      bloodGroup: item.bloodGroup,
+      organType: item.organType,
+      location: item.location,
+      pincode: item.pincode,
+      medicalCondition: item.medicalCondition,
+      emergency: item.Emergency,
+      createdAt: item.createdAt,
+      read: item.read || false,
+    }));
+
+    const donationNotifications = donors.map((item) => ({
+      id: item.id,
+      type: "donation",
+      fullName: item.fullName,
+      phone: item.phone,
+      email: item.email,
+      bloodGroup: item.bloodGroup,
+      organs: item.organs,
+      isAvailableForBlood: item.isAvailableForBlood,
+      isAvailableForOrgan: item.isAvailableForOrgan,
+      location: item.location,
+      pincode: item.pincode,
+      medicalConditions: item.medicalConditions,
+      createdAt: item.createdAt,
+      read: item.read || false,
+    }));
+
+    const combined = [...requestNotifications, ...donationNotifications].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    res.status(200).json(combined);
   } catch (err) {
-    console.error("Error fetching emergencies:", err);
-    res.status(500).json({ message: "Server error fetching emergencies" });
+    console.error("Error fetching notifications:", err);
+    res.status(500).json({ message: "Server error fetching notifications" });
+  }
+});
+
+
+app.put('/notifications/mark-read', async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    await Receipent.updateMany(
+      { readBy: { $ne: userId } },
+      { $addToSet: { readBy: userId } }
+    );
+
+    await Donor.updateMany(
+      { readBy: { $ne: userId } },
+      { $addToSet: { readBy: userId } }
+    );
+
+    res.json({ message: "All notifications marked as read for this user." });
+  } catch (error) {
+    console.error("Mark-read error:", error);
+    res.status(500).json({ error: "Failed to mark notifications as read" });
   }
 });
 
 
 
+
+app.get('/notifications/unread-count', async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    const unreadRequests = await Receipent.countDocuments({
+      readBy: { $ne: userId }
+    });
+
+    const unreadDonations = await Donor.countDocuments({
+      readBy: { $ne: userId }
+    });
+
+    const totalUnread = unreadRequests + unreadDonations;
+
+    res.json({ totalUnread });
+  } catch (error) {
+    console.error("Unread-count error:", error);
+    res.status(500).json({ error: "Failed to fetch unread count" });
+  }
+});
+
+
+app.patch('/notifications/mark-read', async (req, res) => {
+  const { userId } = req.body;
+  try {
+    await Notification.updateMany(
+      { readBy: { $ne: userId } },
+      { $addToSet: { readBy: userId } } 
+    );
+    res.status(200).json({ message: 'Notifications marked as read' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+// Start server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
